@@ -24,3 +24,5 @@ echo "GPUs requested: $SLURM_GPUS"
 echo "Working dir: $(pwd)"
 echo "Image: /home/Student/s4964547/medmnist_project/medmnist.sif"
 echo "--------------------"
+
+srun singularity exec --nv -B /home/Student/s4964547/medmnist_project:/workspace /home/Student/s4964547/medmnist_project/medmnist.sif python /workspace/train.py
