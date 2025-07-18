@@ -1,0 +1,18 @@
+Bootstrap: docker
+From: pytorch/pytorch:2.7.1-cuda11.8-cudnn9-runtime
+
+%post
+    apt-get -y update && apt-get install -y python3-pip
+    pip install --upgrade pip
+    pip install -r /workspace/requirements.txt
+
+%files
+    requirements.txt /workspace/requirements.txt
+    train.py /workspace/train.py
+
+%environment
+    export PATH=/usr/local/bin:$PATH
+    export PYTHONPATH=/workspace:$PYTHONPATH
+
+%runscript
+    exec python /workspace/train.py
