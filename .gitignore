@@ -1,2 +1,6 @@
 *.sif
 *.pyc
+*.pt
+*.secret*
+sweep/
+wandb/

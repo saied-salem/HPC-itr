@@ -8,11 +8,11 @@ From: pytorch/pytorch:2.7.1-cuda11.8-cudnn9-runtime
 
 %files
     requirements.txt /workspace/requirements.txt
-    train.py /workspace/train.py
+    ./src/train.py /workspace/src/train.py
 
 %environment
     export PATH=/usr/local/bin:$PATH
     export PYTHONPATH=/workspace:$PYTHONPATH
 
 %runscript
-    exec python /workspace/train.py
+    exec python /workspace/src/train.py
