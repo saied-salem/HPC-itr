@@ -2,5 +2,6 @@ medmnist
 torchvision
 numpy
 matplotlib
+seaborn
 scikit-learn
 wandb

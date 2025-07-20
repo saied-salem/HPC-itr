@@ -1,6 +1,6 @@
 *.sif
 *.pyc
 *.pt
-*.secret*
+*.secret*                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           
 sweep/
-wandb/
+wandb/                                   

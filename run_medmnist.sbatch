@@ -18,6 +18,7 @@
 : ${BATCH:=64}
 : ${LR:=0.001}
 : ${DATA_FLAG:=pathmnist}
+: ${MODEL:=simplecnn}         # model choice: simplecnn, resnet18, densenet121, efficientnet_b0
 : ${WANDB_PROJECT:=medmnist}
 : ${WANDB_ENTITY:=}            # optional
 : ${WANDB_MODE:=online}       # set to online if cluster has outbound internet
@@ -61,7 +62,7 @@ echo "Node list: ${SLURM_NODELIST}"
 echo "GPUs requested: ${SLURM_GPUS}"
 echo "Working dir: $(pwd)"
 echo "Image: ${IMG_PATH}"
-echo "EPOCHS=${EPOCHS} BATCH=${BATCH} LR=${LR} DATA_FLAG=${DATA_FLAG}"
+echo "EPOCHS=${EPOCHS} BATCH=${BATCH} LR=${LR} DATA_FLAG=${DATA_FLAG} MODEL=${MODEL}"
 echo "WANDB_MODE=${WANDB_MODE} WANDB_PROJECT=${WANDB_PROJECT} WANDB_RUNNAME=${WANDB_RUNNAME}"
 echo "--------------------"
 
@@ -81,6 +82,7 @@ srun singularity exec --nv \
         --batch_size ${BATCH} \
         --lr ${LR} \
         --data_flag ${DATA_FLAG} \
+        --model ${MODEL} \
         --wandb_project \"${WANDB_PROJECT}\" \
         --wandb_entity \"${WANDB_ENTITY}\" \
         --wandb_runname \"${WANDB_RUNNAME}\" \

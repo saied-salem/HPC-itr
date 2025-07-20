@@ -1,11 +1,32 @@
 import os
 os.environ['WANDB_MODE'] = 'online'
+
+# Load wandb API key from secrets file
+def load_wandb_api_key():
+    """Load wandb API key from secrets file"""
+    key_paths = ['.secrets/wandb_api_key']
+    for path in key_paths:
+        if os.path.exists(path):
+            with open(path, 'r') as f:
+                api_key = f.read().strip()
+                os.environ['WANDB_API_KEY'] = api_key
+                print(f"✅ Loaded wandb API key from {path}")
+                return True
+    print("⚠️  No wandb API key found in secrets files")
+    return False
+
+##################### LOCAL PC ONLY######################
+# Load the API key
+# load_wandb_api_key()
+######################## LOCAL PC ONLY######################
 import time
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from tqdm import tqdm
 from sklearn.metrics import precision_score, recall_score, f1_score, confusion_matrix
+import matplotlib.pyplot as plt
+import seaborn as sns
 
 from config import get_args
 from data import get_dataloaders
@@ -39,6 +60,8 @@ def maybe_init_wandb(args, num_classes):
         group=args.wandb_group or None,
         tags=args.wandb_tags,
         config={
+            # Model configuration
+            'model': args.model,
             'data_flag': args.data_flag,
             'epochs': args.epochs,
             'batch_size': args.batch_size,
@@ -54,12 +77,112 @@ def maybe_init_wandb(args, num_classes):
     return run
 
 
-def evaluate(model, loader, device):
+def save_confusion_matrix_image(cm, class_names, epoch, save_path):
+    """Save confusion matrix as an image file"""
+    plt.figure(figsize=(10, 8))
+    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
+                xticklabels=class_names, yticklabels=class_names)
+    plt.title(f'Confusion Matrix - Epoch {epoch}')
+    plt.ylabel('True Label')
+    plt.xlabel('Predicted Label')
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    plt.close()
+
+def collect_misclassified_samples(model, loader, device, num_samples_per_class=5):
+    """Collect only misclassified sample images"""
+    model.eval()
+    misclassified_samples = {}  # true_label -> list of (image, true_label, pred_label, confidence)
+    
+    with torch.no_grad():
+        for images, labels in loader:
+            images = images.to(device)
+            labels = labels.squeeze().long().to(device)
+            outputs = model(images)
+            
+            # Get predictions and confidence
+            probs = torch.softmax(outputs, dim=1)
+            confidences, preds = torch.max(probs, dim=1)
+            
+            # Collect only misclassified samples
+            for i in range(len(images)):
+                true_label = labels[i].item()
+                pred_label = preds[i].item()
+                
+                # Only collect if prediction is wrong
+                if true_label != pred_label:
+                    confidence = confidences[i].item()
+                    image = images[i].cpu()
+                    
+                    if true_label not in misclassified_samples:
+                        misclassified_samples[true_label] = []
+                    
+                    if len(misclassified_samples[true_label]) < num_samples_per_class:
+                        misclassified_samples[true_label].append((image, true_label, pred_label, confidence))
+    
+    return misclassified_samples
+
+def create_misclassified_grids(misclassified_samples, epoch, save_dir="misclassified_samples"):
+    """Create image grids for misclassified samples and save them"""
+    import os
+    
+    # Create save directory
+    os.makedirs(save_dir, exist_ok=True)
+    
+    # Create a grid for each class that has misclassified samples
+    for true_label, samples in misclassified_samples.items():
+        if len(samples) > 0:
+            # Create subplot grid
+            num_samples = len(samples)
+            cols = min(3, num_samples)
+            rows = (num_samples + cols - 1) // cols
+            
+            fig, axes = plt.subplots(rows, cols, figsize=(3*cols, 3*rows))
+            if rows == 1 and cols == 1:
+                axes = [axes]
+            elif rows == 1:
+                axes = axes
+            else:
+                axes = axes.flatten()
+            
+            for i, (image, true_l, pred_l, confidence) in enumerate(samples):
+                if i < len(axes):
+                    # Convert tensor to numpy and transpose for matplotlib
+                    img_np = image.permute(1, 2, 0).numpy()
+                    # Normalize to [0, 1] range
+                    img_np = (img_np - img_np.min()) / (img_np.max() - img_np.min())
+                    
+                    axes[i].imshow(img_np)
+                    axes[i].set_title(f'True: {true_l}, Pred: {pred_l}\nConf: {confidence:.3f}')
+                    axes[i].axis('off')
+            
+            # Hide empty subplots
+            for i in range(num_samples, len(axes)):
+                axes[i].axis('off')
+            
+            plt.suptitle(f'Misclassified Samples - True Label: {true_label}')
+            plt.tight_layout()
+            
+            # Save the grid
+            filename = f"misclassified_true_label_{true_label}.png"
+            filepath = os.path.join(save_dir, filename)
+            plt.savefig(filepath, dpi=150, bbox_inches='tight')
+            plt.close()
+            
+            # Return the filepath for wandb logging
+            yield filepath, true_label
+
+def evaluate(model, loader, device, collect_samples=False):
     model.eval()
     correct, total, running_loss = 0, 0, 0.0
     criterion = nn.CrossEntropyLoss()
     all_preds = []
     all_labels = []
+    misclassification_samples = None
+    
+    if collect_samples:
+        misclassification_samples = collect_misclassified_samples(model, loader, device)
+    
     with torch.no_grad():
         for images, labels in loader:
             images = images.to(device)
@@ -80,7 +203,7 @@ def evaluate(model, loader, device):
     recall = recall_score(all_labels, all_preds, average='macro', zero_division=0)
     f1 = f1_score(all_labels, all_preds, average='macro', zero_division=0)
     cm = confusion_matrix(all_labels, all_preds)
-    return avg_loss, acc, precision, recall, f1, cm, all_labels, all_preds
+    return avg_loss, acc, precision, recall, f1, cm, all_labels, all_preds, misclassification_samples
 
 
 def main():
@@ -132,7 +255,7 @@ def main():
         train_loss = running_loss / len(train_loader)
 
         # Validation
-        val_loss, val_acc, val_precision, val_recall, val_f1, val_cm, all_labels, all_preds = evaluate(model, test_loader, device)
+        val_loss, val_acc, val_precision, val_recall, val_f1, val_cm, all_labels, all_preds, _ = evaluate(model, test_loader, device, collect_samples=False)
         epoch_time = time.time() - epoch_start
         mem_mb = gpu_mem_mb(device)
 
@@ -154,12 +277,21 @@ def main():
                 'gpu_mem_mb': mem_mb,
             }
             if _WANDB_AVAILABLE:
+                # Save confusion matrix as image
+                class_names = [str(i) for i in range(num_classes)]
+                cm_image_path = f"confusion_matrix_epoch_{epoch+1}.png"
+                save_confusion_matrix_image(val_cm, class_names, epoch+1, cm_image_path)
+                
+                # Log both the interactive confusion matrix and the image file
                 log_dict['val_confusion_matrix'] = wandb.plot.confusion_matrix(
                     probs=None,
                     y_true=all_labels,
                     preds=all_preds,
-                    class_names=[str(i) for i in range(num_classes)]
+                    class_names=class_names
                 )
+                log_dict['confusion_matrix_image'] = wandb.Image(cm_image_path)
+                
+
             wandb.log(log_dict)
 
         # Track best
@@ -177,6 +309,60 @@ def main():
                 wandb.save(ckpt_path, base_path=os.getcwd())
 
     print("✅ Training complete!")
+    
+    # Load the best model and get final evaluation
+    print("🔄 Loading best model for final evaluation...")
+    best_ckpt_path = os.path.join(os.getcwd(), f"best_model_{os.getpid()}.pt")
+    
+    if os.path.exists(best_ckpt_path):
+        checkpoint = torch.load(best_ckpt_path, map_location=device)
+        model.load_state_dict(checkpoint['model_state'])
+        best_epoch = checkpoint['epoch']
+        best_val_acc = checkpoint['val_acc']
+        print(f"📥 Loaded best model from epoch {best_epoch} with validation accuracy: {best_val_acc:.2f}%")
+        
+        # Final evaluation with best model
+        print("📊 Running final evaluation with best model...")
+        final_val_loss, final_val_acc, final_val_precision, final_val_recall, final_val_f1, final_val_cm, final_all_labels, final_all_preds, _ = evaluate(model, test_loader, device, collect_samples=False)
+        
+        print(f"🎯 Final Best Model Performance:")
+        print(f"   Validation Loss: {final_val_loss:.4f}")
+        print(f"   Validation Accuracy: {final_val_acc:.2f}%")
+        print(f"   Precision: {final_val_precision:.4f}")
+        print(f"   Recall: {final_val_recall:.4f}")
+        print(f"   F1 Score: {final_val_f1:.4f}")
+        
+        # Collect and upload misclassified samples from best model
+        if run is not None and _WANDB_AVAILABLE:
+            print("📊 Collecting misclassified samples from best model...")
+            
+            # Collect misclassified samples from the best model
+            final_misclassified_samples = collect_misclassified_samples(model, test_loader, device, num_samples_per_class=10)
+            
+            # Create and upload misclassified sample grids
+            for filepath, true_label in create_misclassified_grids(final_misclassified_samples, best_epoch):
+                # Upload to wandb
+                wandb.log({f'best_model_misclassified_samples/true_label_{true_label}': wandb.Image(filepath)})
+                print(f"📸 Uploaded misclassified samples for true label {true_label}")
+            
+            # Log final best model metrics
+            wandb.run.summary['best_model_final_val_loss'] = final_val_loss
+            wandb.run.summary['best_model_final_val_acc'] = final_val_acc
+            wandb.run.summary['best_model_final_val_precision'] = final_val_precision
+            wandb.run.summary['best_model_final_val_recall'] = final_val_recall
+            wandb.run.summary['best_model_final_val_f1'] = final_val_f1
+            wandb.run.summary['best_model_epoch'] = best_epoch
+            
+            # Also log a summary of misclassification statistics
+            total_misclassified = sum(len(samples) for samples in final_misclassified_samples.values())
+            wandb.run.summary['best_model_total_misclassified_samples'] = total_misclassified
+            wandb.run.summary['best_model_misclassified_by_class'] = {f'class_{label}': len(samples) 
+                                                                     for label, samples in final_misclassified_samples.items()}
+            
+            print(f"📈 Total misclassified samples from best model: {total_misclassified}")
+    else:
+        print("⚠️  No best model checkpoint found!")
+    
     if run is not None:
         run.finish()
 
