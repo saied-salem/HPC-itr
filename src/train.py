@@ -25,6 +25,7 @@ import torch.nn as nn
 import torch.optim as optim
 from tqdm import tqdm
 from sklearn.metrics import precision_score, recall_score, f1_score, confusion_matrix
+from sklearn.metrics import roc_auc_score
 import matplotlib.pyplot as plt
 import seaborn as sns
 
@@ -178,6 +179,7 @@ def evaluate(model, loader, device, collect_samples=False):
     criterion = nn.CrossEntropyLoss()
     all_preds = []
     all_labels = []
+    all_probs = []
     misclassification_samples = None
     
     if collect_samples:
@@ -196,6 +198,8 @@ def evaluate(model, loader, device, collect_samples=False):
             preds = torch.argmax(outputs, dim=1).detach().cpu().numpy()
             all_preds.extend(preds)
             all_labels.extend(labels.detach().cpu().numpy())
+            probs = torch.softmax(outputs, dim=1).detach().cpu().numpy()
+            all_probs.extend(probs)
     avg_loss = running_loss / len(loader)
     acc = 100.0 * correct / total
     # Compute additional metrics
@@ -203,6 +207,11 @@ def evaluate(model, loader, device, collect_samples=False):
     recall = recall_score(all_labels, all_preds, average='macro', zero_division=0)
     f1 = f1_score(all_labels, all_preds, average='macro', zero_division=0)
     cm = confusion_matrix(all_labels, all_preds)
+    # Compute AUC (macro, multiclass)
+    try:
+        auc = roc_auc_score(all_labels, all_probs, average='macro', multi_class='ovr')
+    except Exception:
+        auc = float('nan')
     return avg_loss, acc, precision, recall, f1, cm, all_labels, all_preds, misclassification_samples
 
 
@@ -255,13 +264,14 @@ def main():
         train_loss = running_loss / len(train_loader)
 
         # Validation
-        val_loss, val_acc, val_precision, val_recall, val_f1, val_cm, all_labels, all_preds, _ = evaluate(model, test_loader, device, collect_samples=False)
+        val_loss, val_acc, val_precision, val_recall, val_f1, val_cm, all_labels, all_preds, _, val_auc = evaluate(model, test_loader, device, collect_samples=False)
         epoch_time = time.time() - epoch_start
         mem_mb = gpu_mem_mb(device)
 
         print(f"\n[Epoch {epoch+1}/{args.epochs}] Train Loss: {train_loss:.4f} | "
               f"Val Loss: {val_loss:.4f} | Val Acc: {val_acc:.2f}% | "
               f"Precision: {val_precision:.4f} | Recall: {val_recall:.4f} | F1: {val_f1:.4f} | "
+              f"AUC: {val_auc:.4f} | "
               f"Time: {epoch_time:.2f}s | GPU Mem: {mem_mb:.2f} MB\n")
 
         if run is not None:
@@ -273,6 +283,7 @@ def main():
                 'val_precision': val_precision,
                 'val_recall': val_recall,
                 'val_f1': val_f1,
+                'val_auc': val_auc,
                 'epoch_time_s': epoch_time,
                 'gpu_mem_mb': mem_mb,
             }
