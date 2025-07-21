@@ -212,7 +212,7 @@ def evaluate(model, loader, device, collect_samples=False):
         auc = roc_auc_score(all_labels, all_probs, average='macro', multi_class='ovr')
     except Exception:
         auc = float('nan')
-    return avg_loss, acc, precision, recall, f1, cm, all_labels, all_preds, misclassification_samples
+    return avg_loss, acc, precision, recall, f1, cm, all_labels, all_preds, misclassification_samples, auc
 
 
 def main():
